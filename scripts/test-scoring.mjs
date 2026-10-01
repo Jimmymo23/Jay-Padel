@@ -1,0 +1,1 @@
+import {build} from 'esbuild';import {mkdir} from 'node:fs/promises';await mkdir('.sites-runtime/tests',{recursive:true});await build({entryPoints:['tests/scoring.test.ts'],outfile:'.sites-runtime/tests/scoring.mjs',bundle:true,platform:'node',format:'esm'});await import('../.sites-runtime/tests/scoring.mjs');

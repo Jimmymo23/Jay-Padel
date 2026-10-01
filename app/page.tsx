@@ -1,0 +1,1 @@
+import PadelApp from './padel-app';export default function Page(){return <PadelApp/>}
