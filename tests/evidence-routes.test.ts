@@ -43,5 +43,6 @@ user('player');const reported=await issue(req('/api/issues',{courtId:'aeon-2',ca
 user('admin');d=await (await data()).json() as any;const ip=d.pendingIssues[0].photos[0].id;assert.equal((await assess(req('/api/evidence',{id:ip,status:'rejected',reason:'Rejecting test photograph'}))).status,200);assert.equal((await moderate(req('/api/moderation',{id:iid,kind:'issue',action:'publish',reason:'Publishing issue without photo support'}))).status,200);
 user('other');assert.equal((await photo(new Request(origin+'/api/evidence?id='+ip))).status,404);d=await (await data()).json() as any;assert.equal(d.issues[0].photos.length,0);
 user(null);assert.equal((await review(req('/api/reviews',body))).status,401);assert.equal((await photo(new Request(origin+'/api/evidence?id='+pid))).status,401);
+assert.ok(Number(sql.prepare('SELECT count(*) AS n FROM audit').get()?.n)>=5);
 const columns=sql.prepare('PRAGMA table_info(checkins)').all().map((c:any)=>c.name);assert.ok(!columns.includes('latitude'));assert.ok(!columns.includes('longitude'));
 console.log('Evidence route integration checks passed: ownership, geofence, atomic attachments, duplicate prevention, private images, independent moderation and audit.');

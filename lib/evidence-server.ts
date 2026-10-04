@@ -22,6 +22,12 @@ export async function attachmentStatements(body:any,userId:string,target:string,
  return statements;
 }
 export async function decorateEvidence(rows:any[],privateView=false){
- if(!rows.length)return rows;const b=db();
- return Promise.all(rows.map(async r=>{const linked=await b.prepare('SELECT target_id FROM evidence_links WHERE target_id=?').bind(r.id).first();const photos=await b.prepare('SELECT id,category,caption,status FROM evidence_photos WHERE target_id=?').bind(r.id).all();return {...r,location_checked:!!linked,photos:privateView?photos.results:photos.results.filter((p:any)=>p.status==='accepted')};}));
+ if(!rows.length)return rows;const b=db(),linked=new Set<string>(),photos=new Map<string,any[]>();
+ // Fetch metadata in bounded groups; never load image data for the directory.
+ for(let offset=0;offset<rows.length;offset+=80){const ids=rows.slice(offset,offset+80).map(r=>r.id),placeholders=ids.map(()=>'?').join(',');
+  const links=await b.prepare(`SELECT target_id FROM evidence_links WHERE target_id IN (${placeholders})`).bind(...ids).all();for(const link of links.results as any[])linked.add(link.target_id);
+  const found=await b.prepare(`SELECT target_id,id,category,caption,status FROM evidence_photos WHERE target_id IN (${placeholders})`).bind(...ids).all();
+  for(const {target_id,...p} of found.results as any[]){if(!privateView&&p.status!=='accepted')continue;photos.set(target_id,[...(photos.get(target_id)??[]),p]);}
+ }
+ return rows.map(r=>({...r,location_checked:linked.has(r.id),photos:photos.get(r.id)??[]}));
 }
