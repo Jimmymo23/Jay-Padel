@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync} from 'node:fs';
+import {POST as profile} from '../app/api/profile/route';
+import {POST as review} from '../app/api/reviews/route';
+import {POST as venue} from '../app/api/venues/route';
+import {GET as data} from '../app/api/data/route';
+import {identity,today} from '../lib/server';
+import {ACCESS_ISSUER,ACCESS_AUDIENCE} from '../lib/access-auth';
+const g=globalThis as any,sql=new DatabaseSync(':memory:');sql.exec(readFileSync('drizzle/0000_old_electro.sql','utf8'));
+function statement(query:string,values:any[]=[]):any{return {bind:(...v:any[])=>statement(query,v),first:async()=>sql.prepare(query).get(...values)??null,all:async()=>({results:sql.prepare(query).all(...values)}),run:async()=>sql.prepare(query).run(...values)};}
+g.evidenceTestDB={prepare:statement,batch:async(statements:any[])=>{sql.exec('BEGIN');try{const result=[];for(const s of statements)result.push(await s.run());sql.exec('COMMIT');return result;}catch(e){sql.exec('ROLLBACK');throw e;}}};
+const pair=await crypto.subtle.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
+const jwk=await crypto.subtle.exportKey('jwk',pair.publicKey);g.fetch=async()=>Response.json({keys:[{...jwk,kid:'registration-test'}]});
+const encode=(s:string)=>Buffer.from(s).toString('base64url');
+async function user(email:string|null,sub='player'){if(!email){g.evidenceTestHeaders=new Headers();return;}const now=Math.floor(Date.now()/1000),h=encode(JSON.stringify({alg:'RS256',kid:'registration-test'})),p=encode(JSON.stringify({iss:ACCESS_ISSUER,aud:[ACCESS_AUDIENCE],sub,email,type:'app',iat:now,exp:now+300}));const sig=await crypto.subtle.sign('RSASSA-PKCS1-v1_5',pair.privateKey,new TextEncoder().encode(h+'.'+p));g.evidenceTestHeaders=new Headers({'cf-access-jwt-assertion':h+'.'+p+'.'+Buffer.from(sig).toString('base64url')});}
+const origin='https://test.invalid';const req=(body:any,source=origin)=>new Request(origin+'/api/profile',{method:'POST',headers:{origin:source},body:JSON.stringify(body)});
+await user(null);assert.equal((await profile(req({name:'Tester'}))).status,401);
+await user('player@test.invalid');let u=await identity();assert.equal(u?.registered,false);assert.equal(u?.role,'player');assert.equal(u?.displayName,'Player');
+assert.equal((await review(req({}))).status,403);assert.equal((await venue(req({}))).status,403);
+assert.equal((await profile(req({name:'Tester'},'https://evil.invalid'))).status,403);
+for(const name of ['a','a'.repeat(61),'player@test.invalid','<script>','\u0000bad'])assert.equal((await profile(req({name}))).status,400);
+assert.equal((await profile(req({name:'  Test   Player ',role:'owner',userId:'victim'}))).status,200);
+u=await identity();assert.equal(u?.displayName,'Test Player');assert.equal(u?.registered,true);assert.equal(u?.role,'player');assert.equal(sql.prepare("SELECT name FROM users WHERE id='victim'").get(),undefined);
+const d=await (await data()).json() as any;assert.equal(d.user.registered,true);assert.ok(!JSON.stringify(d.user).includes('@'));
+const body={courtId:'aeon-1',playedDate:today(),ratings:{turf:3,lighting:null,glass:null,fence:null,net:null,cleanliness:null},text:'Test registered review'};assert.equal((await review(req(body))).status,201);
+assert.equal((await profile(req({name:'Updated Player'}))).status,200);assert.equal((await identity())?.displayName,'Updated Player');assert.equal(sql.prepare('SELECT count(*) as n FROM reviews').get()?.n,1);
+await user('other@test.invalid','other');assert.equal((await identity())?.registered,false);assert.equal((await (await data()).json() as any).myReviews.length,0);
+await user('admin@test.invalid','admin');u=await identity();assert.equal(u?.role,'owner');assert.equal(u?.registered,true);assert.equal(u?.displayName,'Jay Padel Admin');
+await user('player@test.invalid');sql.prepare("UPDATE users SET role='player' WHERE role='owner'").run();sql.prepare("UPDATE users SET role='owner' WHERE id='cf-access:player'").run();assert.equal((await identity())?.role,'player');assert.equal((await venue(req({}))).status,403);
+g.evidenceTestHeaders=new Headers({'cf-access-jwt-assertion':'invalid','cf-access-authenticated-user-email':'admin@test.invalid'});assert.equal(await identity(),null);
+console.log('Player registration checks passed: verified JWT required, profile validation, origin protection, contribution gating, player role enforcement, private email and preserved records.');
