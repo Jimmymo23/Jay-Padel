@@ -1,10 +1,11 @@
+import {directory} from '../../../lib/directory';
 import {db,identity,sameOrigin,today,error} from '../../../lib/server';
 import {venues} from '../../../lib/data';
 import {locationCheck} from '../../../lib/evidence';
 import {evidenceSchema} from '../../../lib/evidence-server';
 export async function POST(req:Request){try{
  if(!sameOrigin(req))return error('Invalid request origin.',403);const u=await identity();if(!u)return error('Sign in to check in.',401);
- const body:any=await req.json();if(!venues.some(v=>v.id===body.venueId&&v.real))return error('Choose a real venue.');await evidenceSchema();const b=db();
+ const body:any=await req.json();const listing=await directory();if(!listing.venues.some(v=>v.id===body.venueId&&v.real))return error('Choose a real venue.');await evidenceSchema();const b=db();
  if(body.action==='configure'){
   if(u.role!=='owner')return error('Moderator access required.',403);
   if(![body.latitude,body.longitude,body.radius].every(Number.isFinite)||Math.abs(body.latitude)>90||Math.abs(body.longitude)>180||!Number.isInteger(body.radius)||body.radius<50||body.radius>200)return error('Enter valid court coordinates and a radius of 50–200 metres.');

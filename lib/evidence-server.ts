@@ -13,7 +13,7 @@ export async function evidenceSchema(){
 }
 export async function attachmentStatements(body:any,userId:string,target:string,kind:string){
  await evidenceSchema();const b=db();const statements=[];
- if(body.checkinId){const venue=courts.find(c=>c.id===body.courtId)?.venueId;
+ if(body.checkinId){const court=await b.prepare('SELECT venue_id FROM courts WHERE id=?').bind(body.courtId).first<{venue_id:string}>();const venue=court?.venue_id;
   const checkin=await b.prepare('SELECT id FROM checkins WHERE id=? AND user_id=? AND venue_id=? AND played_date=?').bind(body.checkinId,userId,venue,kind==='review'?body.playedDate:today()).first();
   if(!checkin)throw new Error('Check-in does not match this account, venue and play date.');
   statements.push(b.prepare('INSERT INTO evidence_links(target_id,checkin_id) VALUES(?,?)').bind(target,body.checkinId));

@@ -1,3 +1,4 @@
+import {POST as saveVenue} from '../app/api/venues/route';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
@@ -46,3 +47,20 @@ user(null);assert.equal((await review(req('/api/reviews',body))).status,401);ass
 assert.ok(Number(sql.prepare('SELECT count(*) AS n FROM audit').get()?.n)>=5);
 const columns=sql.prepare('PRAGMA table_info(checkins)').all().map((c:any)=>c.name);assert.ok(!columns.includes('latitude'));assert.ok(!columns.includes('longitude'));
 console.log('Evidence route integration checks passed: ownership, geofence, atomic attachments, duplicate prevention, private images, independent moderation and audit.');
+
+const venueBody={name:'Integration Test Club',area:'Test area',facilities:['Parking'],notes:'Synthetic integration test venue',mapUrl:'https://maps.google.com/?q=30,31',bookingUrl:'https://example.com/book',courts:[{name:'Court A',type:'Outdoor'}],location:{latitude:30,longitude:31,radius:100}};
+user(null);assert.equal((await saveVenue(req('/api/venues',venueBody))).status,403);
+user('player');assert.equal((await saveVenue(req('/api/venues',venueBody))).status,403);
+user('admin');assert.equal((await saveVenue(req('/api/venues',venueBody,'https://evil.invalid'))).status,403);
+assert.equal((await saveVenue(req('/api/venues',{...venueBody,mapUrl:'javascript:alert(1)'}))).status,400);
+assert.equal((await saveVenue(req('/api/venues',{...venueBody,courts:[{name:'Court A',type:'Indoor'},{name:'court a',type:'Outdoor'}]}))).status,400);
+const added=await saveVenue(req('/api/venues',venueBody));assert.equal(added.status,201);const listing=await added.json() as any;const vid=listing.id;const cid=listing.courts.find((c:any)=>c.venueId===vid).id;
+let savedVenue=listing.venues.find((v:any)=>v.id===vid);assert.equal(savedVenue.real,true);assert.equal(savedVenue.courts,1);assert.equal(savedVenue.bookingUrl,venueBody.bookingUrl);
+assert.equal((await saveVenue(req('/api/venues',{...venueBody,name:'integration test club'}))).status,409);
+user('player');const newCheckin=await (await checkIn(req('/api/checkins',{venueId:vid,position:{latitude:30,longitude:31,accuracy:10,timestamp:Date.now()}}))).json() as any;assert.ok(newCheckin.id);
+const newReview=await review(req('/api/reviews',{...body,courtId:cid,checkinId:newCheckin.id,photos:[]}));assert.equal(newReview.status,201);const newRid=(await newReview.json() as any).id;
+user('admin');const edited=await saveVenue(req('/api/venues',{...venueBody,venueId:vid,courts:[{id:cid,name:'North Court',type:'Covered'},{name:'South Court',type:'Indoor'}],location:null}));assert.equal(edited.status,200);const updated=await edited.json() as any;savedVenue=updated.venues.find((v:any)=>v.id===vid);assert.equal(savedVenue.courts,2);assert.equal(savedVenue.type,'Mixed');assert.equal(sql.prepare('SELECT court_id FROM reviews WHERE id=?').get(newRid)?.court_id,cid);
+assert.equal((await saveVenue(req('/api/venues',{...venueBody,venueId:vid,courts:[{id:cid,name:'North Court',type:'Outdoor'}]}))).status,409);
+assert.equal((await saveVenue(req('/api/venues',{...venueBody,venueId:vid,courts:[{id:'aeon-1',name:'Wrong court',type:'Outdoor'}]}))).status,409);
+d=await (await data()).json() as any;assert.equal(d.courts.find((c:any)=>c.id===cid).name,'North Court');assert.equal(d.scores[cid].score,null);assert.ok(d.checkinSites.some((s:any)=>s.venue_id===vid));
+console.log('Directory integration checks passed: admin-only creation and editing, duplicate protection, safe links, dynamic reviews/check-ins, mixed courts and preserved review references.');
